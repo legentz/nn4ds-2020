@@ -2,6 +2,13 @@ __pycache__
 *.pyc
 .DS_Store
 
+# notebook
+.ipynb_checkpoints/
+
 # data
 data/**
 !data/em_segmentation.zip
+
+# model checkpoints/saved .h5
+*.h5
+checkpoints/
