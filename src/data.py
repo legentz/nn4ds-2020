@@ -161,36 +161,6 @@ class EMData():
 
 	# ...
 	def generate_train_data(self, binary_labels=False, **kwargs):
-		#assert self.data_generator is not None, 'You need to call \'set_data_generator_up\' method'
-		#
-		#subset = 'training' if self.split_train_for_validation else None
-		#
-		#train_X = self.data_generator.flow_from_directory(
-		#	directory=os.path.join(self.data_path, 'train'),
-		#	subset=subset,
-		#	class_mode=None,
-		#	target_size=image_size,
-		#	color_mode=color_mode[0],
-		#	batch_size=batch_size,
-		#	shuffle=True,
-		#	seed=self.seed
-		#)
-		#train_y = self.data_generator.flow_from_directory(
-		#	directory=os.path.join(self.data_path, 'labels'),
-		#	class_mode=None,
-		#	subset=subset,
-		#	target_size=image_size,
-		#	color_mode=color_mode[1],
-		#	batch_size=batch_size,
-		#	shuffle=True,
-		#	seed=self.seed
-		#)
-		#
-		## yeild data from both generators
-		#for X, y in zip(train_X, train_y):
-		#	if classification == 'binary':
-		#		y = self._to_binary(y, threshold=0.5)
-		#	yield X, y
 		assert self.data_generator is not None, 'You need to call \'set_data_generator_up\' method'
 
 		# if validation_split has not been provided,
@@ -200,38 +170,9 @@ class EMData():
 		# generate training data
 		return self._generate_data(subset, binary_labels=binary_labels, **kwargs)
 
+	# ...
 	def generate_valid_data(self, binary_labels=False, **kwargs):
-		#assert self.data_generator is not None, 'You need to call \'set_data_generator_up\' method'
-		#
-		#subset = 'validation' if self.split_train_for_validation else None
-		#
-		#validation_X = self.data_generator.flow_from_directory(
-		#	directory=os.path.join(self.data_path, 'train'),
-		#	class_mode=None,
-		#	subset=subset,
-		#	target_size=image_size,
-		#	color_mode=color_mode[0],
-		#	batch_size=batch_size,
-		#	shuffle=False,
-		#	seed=self.seed
-		#)
-		#validation_y = self.data_generator.flow_from_directory(
-		#	directory=os.path.join(self.data_path, 'labels'),
-		#	class_mode=None,
-		#	subset=subset,
-		#	target_size=image_size,
-		#	color_mode=color_mode[1],
-		#	batch_size=batch_size,
-		#	shuffle=False,
-		#	seed=self.seed
-		#)
-		#
-		## yeild data from both generators
-		#for X, y in zip(validation_X, validation_y):
-		#	if classification == 'binary':
-		#		y = self._to_binary(y, threshold=0.5)
-		#	yield X, y
-
+		
 		# mandatory check about validation_split configuration in data_generator
 		assert self._is_valid_split_set(), 'You should\'ve set \'validation_split\' in \'set_data_generator_up\' method. All the data were used for training purposes.'  
 
@@ -239,5 +180,5 @@ class EMData():
 		return self._generate_data('validation', binary_labels=binary_labels, **kwargs)
 
 	# TODO
-	def load_test_data(self):
+	def generate_from_folder(self):
 		pass
