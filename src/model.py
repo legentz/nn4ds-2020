@@ -9,6 +9,9 @@ from tensorflow.keras import layers
 # http://localhost:8888/edit/u-net-release/phseg_v5-train.prototxt
 # The authors eschew padding and as result propose cropping in the upsampling
 # layers. Here instead we use padding to avoid the need for cropping.
+
+# TODO: remove classification bool since everything depends on the output_shape:
+# output_shape == 1 then sigmoid/binary_crossentropy; otherwise, softmax/categorical_crossentropy
 class UNet(object):
 	def __init__(self, input_shape, output_shape, classification=None):
 		self.model = None
@@ -170,17 +173,15 @@ class UNet(object):
 
 	# resume weights from a specific checkpoint file (or .h5)
 	# or the latest one from the provided directory
-	def load_weights(self, h5_path, checkpoint=False):
-		assert os.path.exists(h5_path)
+	def load_weights(self, to_restore, checkpoint=False):
+		assert os.path.exists(to_restore)
 
 		# if a directory is provided, load the last checkpoint
-		if os.path.isdir(h5_path) and checkpoint:
-			ckp = tf.train.latest_checkpoint(h5_path)
-		
-		print('Restoring weights from', h5_path)
+		if os.path.isdir(to_restore) and checkpoint:
+			to_restore = tf.train.latest_checkpoint(to_restore)
 
 		# restore weights
-		self.model.load_weights(ckp)
+		self.model.load_weights(to_restore)
 
 	# Fit data to the model. Note that data could be a generator too.
 	def train(self, data, val_data=None, epochs=1, steps_per_epoch=None, model_checkpoint=False):
@@ -208,7 +209,7 @@ class UNet(object):
 			epochs=epochs,
 			steps_per_epoch=steps_per_epoch,
 			validation_data=val_data,
-			validation_steps=int(steps_per_epoch * 0.25),
+			validation_steps=int(steps_per_epoch * 0.25) if val_data is not None else None,
 			callbacks=_callbacks,
 			verbose=1
 		)
