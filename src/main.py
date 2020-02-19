@@ -1,11 +1,15 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
+
 import tensorflow as tf
 from model import UNet
 from data import EMData
+import matplotlib.pyplot as plt
 
 EPOCHS = 5
 
 def data():
-	emdata = EMData(data_path='./../_data/em_segmentation')
+	emdata = EMData(data_path='./../data/em_segmentation')
 	#emdata.unpack(overwrite=True, save_as='.png')
 
 	train_data = emdata.load_training_data(
@@ -20,59 +24,36 @@ def data():
 			'horizontal_flip': True,
 			'vertical_flip': True
 		},
-		batch_size=2,
+		batch_size=1,
 		seed=666
 	)
 	return train_data
 
-def run_tf(train_data):
-
-	# this is required in order to make @tf.function work properly
-	tf.config.experimental_run_functions_eagerly(True)
-
-	unet = UNet()
-	loss_object = tf.keras.losses.CategoricalCrossentropy()
-	optimizer = tf.keras.optimizers.Adam()
-
-	train_loss = tf.keras.metrics.Mean(name='train_loss')
-	train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
-
-	@tf.function
-	def train_step(X, y):
-		with tf.GradientTape() as tape:
-			predictions = unet(X, training=True)
-			loss = loss_object(y, predictions)
-			print('loss', loss)
-		gradients = tape.gradient(loss, unet.trainable_variables)
-		print('gradients', gradients)
-		print('trainable_variables', unet.trainable_variables)
-		optimizer.apply_gradients(zip(gradients, unet.trainable_variables))
-
-		train_loss(loss)
-		train_accuracy(y, predictions)
-
-	for epoch in range(1, EPOCHS + 1):
-
-		# reset the metrics at the start of the next epoch
-		train_loss.reset_states()
-		train_accuracy.reset_states()
-
-		# iterate all over the dataset 
-		for X, y in train_data:
-
-			# traning function
-			train_step(X, y)
-
-			# feedback to user
-			print('Epoch {}, Loss: {}, Accuracy: {}'.format(epoch, train_loss.result(), train_accuracy.result()*100))
-
 def run_k(train_data):
-	unet = UNet()
-	unet.compile(optimizer = tf.keras.optimizers.Adam(lr = 1e-4), loss = 'binary_crossentropy', metrics = ['accuracy'])
-	unet.fit_generator(train_data, steps_per_epoch=300)
+	# Loss: https://datascience.stackexchange.com/questions/42599/what-is-the-relationship-between-the-accuracy-and-the-loss-in-deep-learning
+	unet = UNet((512, 512, 1), 1).get_model()
+	unet.summary()
+	#unet.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+	unet.compile(optimizer='adam', loss=tf.keras.losses.CategoricalCrossentropy(), metrics=['accuracy'])
+	history = unet.fit(train_data, epochs=EPOCHS, steps_per_epoch=100, verbose=1)
 
-# main
+	# show some hisory...
+	acc = history.history['accuracy']
+	loss = history.history['loss']
+
+	plt.figure(figsize=(8, 8))
+	plt.plot(range(EPOCHS), acc, label='Training Accuracy')
+	plt.plot(range(EPOCHS), loss, label='Training Loss')
+	plt.legend(loc='lower right')
+	plt.title('Training and Validation Accuracy')
+	plt.savefig('plot.png')
+
+'''
+Main
+'''
 if __name__ == '__main__':
+	my_devices = tf.config.experimental.list_physical_devices(device_type='CPU')
+	tf.config.experimental.set_visible_devices(devices= my_devices, device_type='CPU')
+
 	train_data = data()
-	run_tf(train_data)
-	#run_k(train_data)
+	run_k(train_data)

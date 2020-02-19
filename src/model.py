@@ -1,75 +1,230 @@
+from types import GeneratorType
+import os
 import tensorflow as tf
 from tensorflow.keras import Model
-from tensorflow.keras.layers import Dense, Conv2D, Conv2DTranspose, MaxPooling2D, Dropout, Input, concatenate
+from tensorflow.keras import callbacks
+from tensorflow.keras import layers
 
-class UNet(Model):
-	def __init__(self):
-		super(UNet, self).__init__()
+# Keras
+# http://localhost:8888/edit/u-net-release/phseg_v5-train.prototxt
+# The authors eschew padding and as result propose cropping in the upsampling
+# layers. Here instead we use padding to avoid the need for cropping.
+class UNet(object):
+	def __init__(self, input_shape, output_shape, classification=None):
+		self.model = None
+		self.input_shape = input_shape
+		self.output_shape = output_shape
+		self.classification = classification
+		self.classification_opts = {
+			'binary': {
+				'output_activation': 'sigmoid',
+				'optimizer': 'adam',
+				'loss': 'binary_crossentropy'
+			},
+			'multi': {
+				'output_activation': 'softmax',
+				'optimizer': 'adam', # TEST SGD
+				'loss': 'categorical_crossentropy' # TEST dice_coeff
+			}
+		}
 
-		# dropout
-		self.dropout = Dropout(0.5)
+		# this would propably be useful in case of any misspelling...
+		assert classification in self.classification_opts.keys()
 
-		# conv
-		conv = lambda n_filters: Conv2D(n_filters, (3, 3), activation='relu', padding='same', kernel_initializer='he_normal')
-		self.filters_2_conv = {k: conv(k) for k in [64, 128, 256, 512, 1024]}
-		self.conv = self.__conv_block
-		
-		# concat
-		self.copy_and_crop = lambda x: concatenate(x, axis=3)
-		
-		# downsample
-		self.max_pool = MaxPooling2D(pool_size=(2, 2))
-		
-		# upsample
-		up_conv = lambda n_filters: Conv2DTranspose(n_filters, (3, 3), strides=(2, 2), padding='same')
-		self.filters_2_up_conv = {k: up_conv(k) for k in [64, 128, 256, 512]}
-		self.up_conv = self.__up_conv_block
+		# initialize model
+		self._build_model()
 
-		self.outputs = Conv2D(1, (3, 3), activation='softmax', padding='same', kernel_initializer='he_normal')
+	## Layers ##
+	## The names of the functions below refer to the original paper dictionary ##
 	
-	def __up_conv_block(self, x, n_filters):
-		conv2d_t = self.filters_2_up_conv[n_filters]
-		return conv2d_t(x)
-	
-	def __conv_block(self, x, n_filters, repeat=1):
+	# dropout
+	def _dropout(self, x, value):
+		return layers.Dropout(value)(x)
+
+	# down-convolution (ReLU activated) with optional batch norm
+	def _conv(self, x, n_filters, repeat=1, batch_norm=False, **kwargs):
+		kwargs_ = {
+			# https://stackoverflow.com/questions/48641192/xavier-and-he-normal-initialization-difference 
+			**dict(kernel_size=3, kernel_initializer='glorot_normal', padding='same'),
+			**kwargs
+		}
+
+		# apply Conv2D N times if needed
 		for i in range(repeat):
-			conv2d = self.filters_2_conv[n_filters]
-			x = conv2d(x)
+			x = layers.Conv2D(n_filters, **kwargs_)(x)
+			
+			# https://machinelearningmastery.com/how-to-accelerate-learning-of-deep-neural-networks-with-batch-normalization/
+			if batch_norm: x = layers.BatchNormalization(momentum=0.99)(x)
+			
+			# TEST is this should be put before or after batch_norm
+			x = layers.Activation('relu')(x)
 		return x
 
-	def __call__(self, x, training=False):
+	# max-pool
+	def _max_pool(self, x, pool_size=(2, 2)):
+		return layers.MaxPooling2D(pool_size=pool_size)(x)
 
+	# concatenation of one or more layers
+	def _copy_and_crop(self, x=[], axis=3):
+		return layers.concatenate(x, axis=axis)
+
+	# https://stats.stackexchange.com/questions/252810/in-cnn-are-upsampling-and-transpose-convolution-the-same
+	def _up_conv(self, x, n_filters, **kwargs):
+		kwargs_ = {
+			**dict(kernel_size=(3, 3), strides=(2, 2), padding='same'),
+			**kwargs
+		}
+		return layers.Conv2DTranspose(n_filters, **kwargs_)(x)
+
+	# input
+	# e.g. (n_samples, width, height, channels)
+	# (3, 128, 128, 3) --> a batch of three 128x128 images in RGB
+	def _inputs(self):
+		return layers.Input(self.input_shape)
+
+	# output
+	# https://stats.stackexchange.com/questions/246287/regarding-the-output-format-for-semantic-segmentation
+	# TODO: refactor this method after testing the pixel-wise softmax
+	def _outputs(self, x):
+
+		# we use sigmoid since we're working with B/W masks
+		if self.classification == 'binary':
+			x = self._conv(x, self.output_shape, kernel_size=(1, 1))
+
+		# TO TEST
+		# pixelwise probability vector -> (batch_size, rows*cols, n_classes)
+		else:
+			_, n_rows, n_cols, _ = self.input_shape
+			x = self._conv(x, self.output_shape, kernel_size=1, strides=1)
+			x = layers.Reshape((self.output_shape, n_rows * n_cols))(x)
+			x = layers.Permute((2,1))(x)
+		
+		# use the most appropriate activation function based on the classification task
+		activation_kind = self.classification_opts[self.classification]['output_activation']
+		x = layers.Activation(activation_kind)(x)
+		return x
+
+	# assemble the U-shaped architecture
+	def _build_model(self):
+
+		# input
+		inputs = self._inputs()
+		
 		# left
-		x_64 = self.conv(x, 64, repeat=2)
-		x = self.max_pool(x_64)
-		x_128 = self.conv(x, 128, repeat=2)
-		x = self.max_pool(x_128)
-		x_256 = self.conv(x, 256, repeat=2)
-		x = self.max_pool(x_256)
-		x_512 = self.conv(x, 512, repeat=2)
-		x = self.max_pool(x_512)
+		x_64 = self._conv(inputs, 64, repeat=2, batch_norm=True)
+		x = self._max_pool(x_64)
 
-		# center
-		x_1024 = self.conv(x, 1024, repeat=2)
-		x = self.up_conv(x_1024, 512)
+		x_128 = self._conv(x, 128, repeat=2, batch_norm=True)
+		x = self._max_pool(x_128)
+
+		x_256 = self._conv(x, 256, repeat=2, batch_norm=True)
+		x = self._max_pool(x_256)
+
+		x_512 = self._conv(x, 512, repeat=2, batch_norm=True)
+		x = self._max_pool(x_512)
+
+		# TODO: dropout (training only)
+		#if training: x = self._dropout(x, 0.5)
+		self._dropout(x, 0.5)
+
+		# bottleneck
+		x = self._conv(x, 1024, repeat=2, batch_norm=True)
+
+		# TODO: dropout (training only)
+		#if training: x = self._dropout(x, 0.5)
+		self._dropout(x, 0.5)
 
 		# right
-		x = self.copy_and_crop([x, x_512])
-		x = self.conv(x, 512, repeat=2)
-		x = self.up_conv(x, 256)
-		x = self.copy_and_crop([x, x_256])
-		x = self.conv(x, 256, repeat=2)
-		x = self.up_conv(x, 128)
-		x = self.copy_and_crop([x, x_128])
-		x = self.conv(x, 128, repeat=2)
-		x = self.up_conv(x, 64)
-		x = self.copy_and_crop([x, x_64])
-		x = self.conv(x, 64, repeat=2)
+		x = self._up_conv(x, 512)
+		x = self._copy_and_crop([x, x_512])
+		x = self._conv(x, 512, repeat=2, batch_norm=True)
 
-		#if training: x = self.dropout(x) <<< TODO
+		x = self._up_conv(x, 256)
+		x = self._copy_and_crop([x, x_256])
+		x = self._conv(x, 256, repeat=2, batch_norm=True)
+
+		x = self._up_conv(x, 128)
+		x = self._copy_and_crop([x, x_128])
+		x = self._conv(x, 128, repeat=2, batch_norm=True)
+
+		x = self._up_conv(x, 64)
+		x = self._copy_and_crop([x, x_64])
+		x = self._conv(x, 64, repeat=2, batch_norm=True)
 
 		# output
-		return self.outputs(x)
+		outputs = self._outputs(x)
+					
+		self.model = Model(inputs=[inputs], outputs=[outputs])
+
+	# compile model
+	# TODO: add more verbosity
+	def _compile_model(self):
+		assert self.model is not None
+
+		optimizer = self.classification_opts[self.classification]['optimizer']
+		loss = self.classification_opts[self.classification]['loss']
+		self.model.compile(optimizer=optimizer, loss=loss, metrics=['accuracy'])
+
+	# TODO: save history in a .png plot
+	#def _save_plot(self): pass
+
+	# resume weights from a specific checkpoint file (or .h5)
+	# or the latest one from the provided directory
+	def load_weights(self, h5_path, checkpoint=False):
+		assert os.path.exists(h5_path)
+
+		# if a directory is provided, load the last checkpoint
+		if os.path.isdir(h5_path) and checkpoint:
+			ckp = tf.train.latest_checkpoint(h5_path)
+		
+		print('Restoring weights from', h5_path)
+
+		# restore weights
+		self.model.load_weights(ckp)
+
+	# Fit data to the model. Note that data could be a generator too.
+	def train(self, data, val_data=None, epochs=1, steps_per_epoch=None, model_checkpoint=False):
+
+		# set optimizers, loss function and so forth...
+		self._compile_model()
+
+		# set useful callbacks
+		# TODO: refactor callbacks handling
+		# TODO: early_stopping
+		_callbacks = []
+
+		if model_checkpoint:
+			checkpoint = callbacks.ModelCheckpoint(
+				filepath='./checkpoints/model-{epoch:02d}.ckpt', 
+				save_weights_only=True,
+				save_freq='epoch',
+				verbose=1
+			)
+			_callbacks.append(checkpoint)
+
+		# fit data 
+		history = self.model.fit(
+			data,
+			epochs=epochs,
+			steps_per_epoch=steps_per_epoch,
+			validation_data=val_data,
+			validation_steps=int(steps_per_epoch * 0.25),
+			callbacks=_callbacks,
+			verbose=1
+		)
+		return history
 
 
+	# TODO
+	def predict(self, data):
+		pass
 
+	def get_model(self):
+		return self.model
+
+	def get_weights(self):
+		return self.model.get_weights()
+
+	# get a "user-friendly" summary of the model 
+	def summary(self):
+		self.model.summary()
