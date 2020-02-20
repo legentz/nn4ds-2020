@@ -5,8 +5,7 @@ from tensorflow.keras import Model
 from tensorflow.keras import callbacks
 from tensorflow.keras import layers
 
-# Keras
-# http://localhost:8888/edit/u-net-release/phseg_v5-train.prototxt
+# model structure taken from u-net-release/phseg_v5-train.prototxt
 # The authors eschew padding and as result propose cropping in the upsampling
 # layers. Here instead we use padding to avoid the need for cropping.
 
@@ -48,7 +47,11 @@ class UNet(object):
 	def _conv(self, x, n_filters, repeat=1, batch_norm=False, **kwargs):
 		kwargs_ = {
 			# https://stackoverflow.com/questions/48641192/xavier-and-he-normal-initialization-difference 
-			**dict(kernel_size=3, kernel_initializer='glorot_normal', padding='same'),
+			**dict(
+				kernel_size=3,
+				kernel_initializer='glorot_normal',
+				padding='same'
+			),
 			**kwargs
 		}
 
@@ -59,7 +62,7 @@ class UNet(object):
 			# https://machinelearningmastery.com/how-to-accelerate-learning-of-deep-neural-networks-with-batch-normalization/
 			if batch_norm: x = layers.BatchNormalization(momentum=0.99)(x)
 			
-			# TEST is this should be put before or after batch_norm
+			# activate
 			x = layers.Activation('relu')(x)
 		return x
 
@@ -74,7 +77,11 @@ class UNet(object):
 	# https://stats.stackexchange.com/questions/252810/in-cnn-are-upsampling-and-transpose-convolution-the-same
 	def _up_conv(self, x, n_filters, **kwargs):
 		kwargs_ = {
-			**dict(kernel_size=(3, 3), strides=(2, 2), padding='same'),
+			**dict(
+				kernel_size=(3, 3),
+				strides=(2, 2),
+				padding='same'
+			),
 			**kwargs
 		}
 		return layers.Conv2DTranspose(n_filters, **kwargs_)(x)
@@ -108,6 +115,7 @@ class UNet(object):
 		return x
 
 	# assemble the U-shaped architecture
+	# ref.: https://arxiv.org/pdf/1505.04597.pdf
 	def _build_model(self):
 
 		# input
@@ -116,40 +124,34 @@ class UNet(object):
 		# left
 		x_64 = self._conv(inputs, 64, repeat=2, batch_norm=True)
 		x = self._max_pool(x_64)
-
 		x_128 = self._conv(x, 128, repeat=2, batch_norm=True)
 		x = self._max_pool(x_128)
-
 		x_256 = self._conv(x, 256, repeat=2, batch_norm=True)
 		x = self._max_pool(x_256)
-
 		x_512 = self._conv(x, 512, repeat=2, batch_norm=True)
 		x = self._max_pool(x_512)
 
-		# TODO: dropout (training only)
-		#if training: x = self._dropout(x, 0.5)
+		# dropout will be applied during training only
+		# Keras takes the merit
 		self._dropout(x, 0.5)
 
 		# bottleneck
 		x = self._conv(x, 1024, repeat=2, batch_norm=True)
 
-		# TODO: dropout (training only)
-		#if training: x = self._dropout(x, 0.5)
+		# dropout will be applied during training only
+		# Keras takes the merit
 		self._dropout(x, 0.5)
 
 		# right
 		x = self._up_conv(x, 512)
 		x = self._copy_and_crop([x, x_512])
 		x = self._conv(x, 512, repeat=2, batch_norm=True)
-
 		x = self._up_conv(x, 256)
 		x = self._copy_and_crop([x, x_256])
 		x = self._conv(x, 256, repeat=2, batch_norm=True)
-
 		x = self._up_conv(x, 128)
 		x = self._copy_and_crop([x, x_128])
 		x = self._conv(x, 128, repeat=2, batch_norm=True)
-
 		x = self._up_conv(x, 64)
 		x = self._copy_and_crop([x, x_64])
 		x = self._conv(x, 64, repeat=2, batch_norm=True)
@@ -168,8 +170,24 @@ class UNet(object):
 		loss = self.classification_opts[self.classification]['loss']
 		self.model.compile(optimizer=optimizer, loss=loss, metrics=['accuracy'])
 
-	# TODO: save history in a .png plot
-	#def _save_plot(self): pass
+	# set useful callbacks
+	def _set_callbacks(self, model_checkpoint=False, early_stopping=False):
+		callbacks_ = []
+
+		if model_checkpoint:
+			checkpoint = callbacks.ModelCheckpoint(
+				filepath='./checkpoints/model-{epoch:02d}.ckpt', 
+				save_weights_only=True,
+				save_freq='epoch',
+				verbose=1
+			)
+			callbacks_.append(checkpoint)
+
+		# TODO: early_stopping
+		if early_stopping:
+			pass
+
+		return callbacks_
 
 	# resume weights from a specific checkpoint file (or .h5)
 	# or the latest one from the provided directory
@@ -184,24 +202,12 @@ class UNet(object):
 		self.model.load_weights(to_restore)
 
 	# Fit data to the model. Note that data could be a generator too.
-	def train(self, data, val_data=None, epochs=1, steps_per_epoch=None, model_checkpoint=False):
+	def train(self, data, val_data=None, epochs=1, steps_per_epoch=None, model_checkpoint=False, early_stopping=False):
 
 		# set optimizers, loss function and so forth...
 		self._compile_model()
 
-		# set useful callbacks
-		# TODO: refactor callbacks handling
-		# TODO: early_stopping
-		_callbacks = []
-
-		if model_checkpoint:
-			checkpoint = callbacks.ModelCheckpoint(
-				filepath='./checkpoints/model-{epoch:02d}.ckpt', 
-				save_weights_only=True,
-				save_freq='epoch',
-				verbose=1
-			)
-			_callbacks.append(checkpoint)
+		callbacks_ = self._set_callbacks(model_checkpoint, early_stopping)
 
 		# fit data 
 		history = self.model.fit(
@@ -209,16 +215,16 @@ class UNet(object):
 			epochs=epochs,
 			steps_per_epoch=steps_per_epoch,
 			validation_data=val_data,
-			validation_steps=int(steps_per_epoch * 0.25) if val_data is not None else None,
-			callbacks=_callbacks,
+
+			# ...
+			validation_steps=int(steps_per_epoch * 0.20) if val_data is not None else None,
+			callbacks=callbacks_,
 			verbose=1
 		)
 		return history
 
-
-	# TODO
-	def predict(self, data):
-		pass
+	def predict(self, data, **kwargs):
+		return self.model.predict(data, **kwargs)
 
 	def get_model(self):
 		return self.model
@@ -226,6 +232,5 @@ class UNet(object):
 	def get_weights(self):
 		return self.model.get_weights()
 
-	# get a "user-friendly" summary of the model 
 	def summary(self):
 		self.model.summary()

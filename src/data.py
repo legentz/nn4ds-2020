@@ -1,21 +1,18 @@
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from PIL import Image
 import os, shutil
-from sys import exit
 import numpy as np
 
 '''
-[...]
+This class is merely a wrapper for EM-Segmentation dataset. It checks, unpacks and
+sets everything up before feeding those data to the UNet model. It is clear that this
+class is needed for being clear and less noisy in the Jupyter Notebook.
 '''
 class EMData():
-	#def __init__(self, data_path, seed=None):
 	def __init__(self, data_path):
 
 		# check whether path does exists
 		assert os.path.exists(data_path)
-
-		# Same seed for reproducibility (no. matricula)
-		#self.seed = seed
 
 		# dataset 
 		self.data_path = data_path
@@ -54,20 +51,6 @@ class EMData():
 			# folders do not exist. Need to create them
 			else: os.makedirs(f_path)
 
-	# it converts a Numpy array composed of real values [0, 1]
-	# into a binary one using a threshold
-	def _to_binary(self, data, threshold=0.6):
-		assert type(data) == np.ndarray
-
-		# check if it's already binary
-		if ((data == 0) | (data == 1)).all():
-			return data
-
-		# transform data in binary using a threshold (binary classification )
-		data[data < threshold] = 0 
-		data[data >= threshold] = 1
-		return data
-
 	'''
 	Unpack the original multi-frame .tif file
 	'''
@@ -104,21 +87,16 @@ class EMData():
 	# a small hack to read data_generator internal configuration
 	# and know something about '_validation_split' value
 	def _is_valid_split_set(self):
-		assert self.data_generator is not None
-		
-		# dataset will be split in two sets whether '_validation_split' > 0.
+		if self.data_generator is None:
+			return False
 		return self.data_generator.__dict__['_validation_split'] > 0.
 
 	# it provides an infinite stream of augmented data
 	def _generate_data(self, subset, binary_labels=False, **kwargs):
-		assert self.data_generator is not None, 'You need to call \'set_data_generator_up\' method'
-
 		kwargs_ = {
 			**dict(
 				subset=subset,
 				shuffle=True if subset == 'training' else False,
-
-				# default
 				class_mode=None,
 				color_mode='rgb',
 				target_size=(256, 256),
@@ -128,7 +106,7 @@ class EMData():
 			**kwargs
 		}
 
-		# to avoid directory overwriting, just in case it's provided from the user 
+		# fix: to avoid directory overwriting (just in case it's provided from the user) 
 		if 'directory' in kwargs_: del kwargs_['directory']
 
 		# setting directories up
@@ -142,17 +120,15 @@ class EMData():
 		# yeild data from both generators
 		for X, y in zip(X, y):
 
-			# transform labels to binary if needed
+			# transform labels to binary if requested
 			if binary_labels:
-
-				# transform output to binary
-				y = self._to_binary(y, threshold=0.5)
+				y[y < 0.5] = 0 
+				y[y >= 0.5] = 1
 
 			yield X, y
 
-	# get traning data through a ImageDataGenerator generators
-	# which will handle data augmentation
-	def set_generator_up(self, data_augmentation=dict()):
+	# ImageDataGenerator generator which will handle train/validation data augmentation
+	def init_data_generator(self, data_augmentation=dict()):
 		self.data_generator = ImageDataGenerator(**data_augmentation)
 
 		# inform user about validation split
@@ -163,8 +139,7 @@ class EMData():
 	def generate_train_data(self, binary_labels=False, **kwargs):
 		assert self.data_generator is not None, 'You need to call \'set_data_generator_up\' method'
 
-		# if validation_split has not been provided,
-		# use data just for traning (no subsets)
+		# if validation_split has not been provided, use data just for traning (no subsets)
 		subset = 'training' if self._is_valid_split_set() else None
 
 		# generate training data
@@ -172,13 +147,11 @@ class EMData():
 
 	# ...
 	def generate_valid_data(self, binary_labels=False, **kwargs):
-		
-		# mandatory check about validation_split configuration in data_generator
 		assert self._is_valid_split_set(), 'You should\'ve set \'validation_split\' in \'set_data_generator_up\' method. All the data were used for training purposes.'  
 
 		# it generates validation data
 		return self._generate_data('validation', binary_labels=binary_labels, **kwargs)
 
-	# TODO
-	def generate_from_folder(self):
-		pass
+	# We don't have the test labels. We'll use test data for the prediction phase.
+	def generate_aug_test_data(self):
+		raise('Not implemented')
