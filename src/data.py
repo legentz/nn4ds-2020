@@ -136,7 +136,7 @@ class EMData():
 			print('A subset will be used for validation purposes (' + str(data_augmentation['validation_split'] * 100) + '%)')
 
 	# ...
-	def generate_train_data(self, binary_labels=False, **kwargs):
+	def generate_train(self, binary_labels=False, **kwargs):
 		assert self.data_generator is not None, 'You need to call \'set_data_generator_up\' method'
 
 		# if validation_split has not been provided, use data just for traning (no subsets)
@@ -146,12 +146,13 @@ class EMData():
 		return self._generate_data(subset, binary_labels=binary_labels, **kwargs)
 
 	# ...
-	def generate_valid_data(self, binary_labels=False, **kwargs):
+	def generate_valid(self, binary_labels=False, **kwargs):
 		assert self._is_valid_split_set(), 'You should\'ve set \'validation_split\' in \'set_data_generator_up\' method. All the data were used for training purposes.'  
 
 		# it generates validation data
 		return self._generate_data('validation', binary_labels=binary_labels, **kwargs)
 
 	# We don't have the test labels. We'll use test data for the prediction phase.
-	def generate_aug_test_data(self):
-		raise('Not implemented')
+	def generate_test(self):
+		raise('Sorry, not implemented. However, you could iterate over test data through Iterator.imgs_from_folder.')
+
