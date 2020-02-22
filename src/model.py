@@ -101,8 +101,7 @@ class UNet(object):
 		if self.classification == 'binary':
 			x = self._conv(x, self.output_shape, kernel_size=(1, 1))
 
-		# TO TEST
-		# pixelwise probability vector -> (batch_size, rows*cols, n_classes)
+		# TEST: pixelwise probability vector -> (batch_size, rows*cols, n_classes)
 		else:
 			_, n_rows, n_cols, _ = self.input_shape
 			x = self._conv(x, self.output_shape, kernel_size=1, strides=1)
@@ -171,7 +170,7 @@ class UNet(object):
 		self.model.compile(optimizer=optimizer, loss=loss, metrics=['accuracy'])
 
 	# set useful callbacks
-	def _set_callbacks(self, model_checkpoint=False, early_stopping=False):
+	def _set_callbacks(self, model_checkpoint=False, early_stopping=False, reduce_lr=False):
 		callbacks_ = []
 
 		if model_checkpoint:
@@ -185,24 +184,28 @@ class UNet(object):
 
 		# TODO: early_stopping
 		if early_stopping:
-			pass
+			stopping = callbacks.EarlyStopping(
+				monitor='val_loss',
+				patience=2,
+				verbose=1
+			)
+			callbacks_.append(stopping)
+
+		# TODO: gradually decrease learning rate
+		if reduce_lr:
+			reduc_lr = callbacks.ReduceLROnPlateau(
+				monitor='val_acc',
+				factor=0.1,
+				patience=1,
+				min_lr=.001,
+				verbose=1
+			)
+			callbacks_.append(reduc_lr)
 
 		return callbacks_
 
-	# resume weights from a specific checkpoint file (or .h5)
-	# or the latest one from the provided directory
-	def load_weights(self, to_restore, checkpoint=False):
-		assert os.path.exists(to_restore)
-
-		# if a directory is provided, load the last checkpoint
-		if os.path.isdir(to_restore) and checkpoint:
-			to_restore = tf.train.latest_checkpoint(to_restore)
-
-		# restore weights
-		self.model.load_weights(to_restore)
-
 	# Fit data to the model. Note that data could be a generator too.
-	def train(self, data, val_data=None, epochs=1, steps_per_epoch=None, model_checkpoint=False, early_stopping=False):
+	def train(self, data, val_data=None, epochs=1, steps_per_epoch=None, model_checkpoint=False, early_stopping=False, reduce_lr=False):
 
 		# set optimizers, loss function and so forth...
 		self._compile_model()
@@ -216,15 +219,32 @@ class UNet(object):
 			steps_per_epoch=steps_per_epoch,
 			validation_data=val_data,
 
-			# ...
+			# we assume that the 20% of steps_per_epoch is good enough for each validation round
 			validation_steps=int(steps_per_epoch * 0.20) if val_data is not None else None,
 			callbacks=callbacks_,
 			verbose=1
 		)
 		return history
 
-	def predict(self, data, **kwargs):
-		return self.model.predict(data, **kwargs)
+	def predict(self, data, threshold=None, **kwargs):
+		predictions = self.model.predict(data, **kwargs)
+
+		# round predictions 
+		if threshold is not None:
+			return np.where(predictions > threshold, 1, 0)
+		return predictions
+
+	# resume weights from a specific checkpoint file (or .h5)
+	# or the latest one from the provided directory
+	def load_weights(self, to_restore, checkpoint=False):
+		assert os.path.exists(to_restore)
+
+		# if a directory is provided, load the last checkpoint
+		if os.path.isdir(to_restore) and checkpoint:
+			to_restore = tf.train.latest_checkpoint(to_restore)
+
+		# restore weights
+		self.model.load_weights(to_restore)
 
 	def get_model(self):
 		return self.model
