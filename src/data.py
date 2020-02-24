@@ -122,8 +122,7 @@ class EMData():
 
 			# transform labels to binary if requested
 			if binary_labels:
-				y[y < 0.5] = 0 
-				y[y >= 0.5] = 1
+				y = np.where(y < 0.5, 0, 1)
 
 			yield X, y
 
@@ -135,7 +134,8 @@ class EMData():
 		if self._is_valid_split_set():
 			print('A subset will be used for validation purposes (' + str(data_augmentation['validation_split'] * 100) + '%)')
 
-	# ...
+	# Overloading of the _generate_data method
+	# It generates the augmented training data  
 	def generate_train(self, binary_labels=False, **kwargs):
 		assert self.data_generator is not None, 'You need to call \'set_data_generator_up\' method'
 
@@ -145,14 +145,16 @@ class EMData():
 		# generate training data
 		return self._generate_data(subset, binary_labels=binary_labels, **kwargs)
 
-	# ...
+	# Overloading of the _generate_data method
+	# It generates the augmented validation data (if needed)  
 	def generate_valid(self, binary_labels=False, **kwargs):
 		assert self._is_valid_split_set(), 'You should\'ve set \'validation_split\' in \'set_data_generator_up\' method. All the data were used for training purposes.'  
 
 		# it generates validation data
 		return self._generate_data('validation', binary_labels=binary_labels, **kwargs)
 
-	# We don't have the test labels. We'll use test data for the prediction phase.
+	# INFO: We don't have the test labels
+	# Test data is used for the prediction phase
 	def generate_test(self):
 		raise('Sorry, not implemented. However, you could iterate over test data through Iterator.imgs_from_folder.')
 
