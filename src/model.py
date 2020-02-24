@@ -5,13 +5,18 @@ from tensorflow.keras import Model
 from tensorflow.keras import callbacks
 from tensorflow.keras import layers
 
-## Layers ##
-## The names of the functions below refer to the original paper dictionary ##
+'''
+The U-Net model described in the Notebook.
+INFO: The names of the functions representing layers below
+(ex. copy_and_crop) refer to the original paper notation
+'''
 class UNet(object):
 	def __init__(self, input_shape, output_shape):
 		self.model = None
 		self.input_shape = input_shape
 		self.output_shape = output_shape
+
+		# options for model.compile and model.fit
 		self.compile_opt = {
 			'optimizer': 'adam',
 			'loss': 'binary_crossentropy',
@@ -26,16 +31,22 @@ class UNet(object):
 		# initialize model
 		self._build_model()
 	
-	# dropout
+	'''
+	Dropout layer
+	'''
 	def _dropout(self, x, value):
 		return layers.Dropout(value)(x)
 
-	# down-convolution (ReLU activated) with optional batch norm
+	'''
+	Down-convolution padded (ReLU activated) with optional BatchNormalization
+	[more info inside the Notebook]
+	'''
 	def _conv(self, x, n_filters, repeat=1, batch_norm=False, **kwargs):
 		kwargs_ = {
-			# https://stackoverflow.com/questions/48641192/xavier-and-he-normal-initialization-difference 
 			**dict(
 				kernel_size=3,
+
+				# https://stackoverflow.com/questions/48641192/xavier-and-he-normal-initialization-difference 
 				kernel_initializer='glorot_normal',
 				padding='same'
 			),
@@ -53,16 +64,24 @@ class UNet(object):
 			x = layers.Activation('relu')(x)
 		return x
 
-	# max-pool layer
+	'''
+	Max-pool layer (down-sampling)
+	'''
 	def _max_pool(self, x, pool_size=(2, 2)):
 		return layers.MaxPooling2D(pool_size=pool_size)(x)
 
-	# concatenation layer
+	'''
+	Skip-connection which facilitates data transmission from the encoder to the decode
+	when upsampling an image. 
+	NOTE: Crop is not necessary as we're working with padded convolutions
+	'''
 	def _copy_and_crop(self, x=[], axis=3):
 		return layers.concatenate(x, axis=axis)
 
-	# upsampling layer
-	# https://stats.stackexchange.com/questions/252810/in-cnn-are-upsampling-and-transpose-convolution-the-same
+	'''
+	Decovolution layer (up-sampling) [more info inside the Notebook]
+	https://stats.stackexchange.com/questions/252810/in-cnn-are-upsampling-and-transpose-convolution-the-same
+	'''
 	def _up_conv(self, x, n_filters, **kwargs):
 		kwargs_ = {
 			**dict(
@@ -76,13 +95,17 @@ class UNet(object):
 		}
 		return layers.Conv2DTranspose(n_filters, **kwargs_)(x)
 
-	# input layer
-	# ex. (n_samples, width, height, channels) -> channel_last format
+	'''
+	Input layer
+	ex. (n_samples, width, height, channels) -> channel_last format
+	'''
 	def _inputs(self):
 		return layers.Input(self.input_shape)
 
-	# output layer
-	# output for binary classification only (no softmax)
+	'''
+	Output layer
+	output for binary classification only
+	'''
 	def _outputs(self, x):
 		x = self._conv(x, self.output_shape, kernel_size=(1, 1))
 
@@ -98,7 +121,7 @@ class UNet(object):
 		# input
 		inputs = self._inputs()
 		
-		# left
+		# left (encoder)
 		x_64 = self._conv(inputs, 64, repeat=2, batch_norm=True)
 		x = self._max_pool(x_64)
 		x_128 = self._conv(x, 128, repeat=2, batch_norm=True)
@@ -119,7 +142,7 @@ class UNet(object):
 		# Keras takes the merit
 		self._dropout(x, 0.5)
 
-		# right
+		# right (decoder)
 		x = self._up_conv(x, 512)
 		x = self._copy_and_crop([x, x_512])
 		x = self._conv(x, 512, repeat=2, batch_norm=True)
@@ -139,7 +162,10 @@ class UNet(object):
 		# set model
 		self.model = Model(inputs=[inputs], outputs=[outputs])
 
-	# compile
+	'''
+	Compile model
+	Putting together optimizer, loss and metrics for binary classification
+	'''
 	def _compile_model(self):
 		assert self.model is not None
 
@@ -150,7 +176,10 @@ class UNet(object):
 			metrics=self.compile_opt['metrics']
 		)
 
-	# set useful callbacks for traning
+	'''
+	It sets useful callbacks for traning such as EarlyStopping
+	[more info inside the Notebook]
+	'''
 	def _set_callbacks(self, cbks):
 		callbacks_ = []
 
@@ -179,7 +208,6 @@ class UNet(object):
 				verbose=1
 			)
 			callbacks_.append(e_stopping)
-			#else: print('WARNING: Cannot use early_stopping callbacks since no validation data has been provided')
 
 		# gradually decrease learning rate when the model stops learning
 		if 'reduce_lr_on_plateau' in cbks:
@@ -201,9 +229,11 @@ class UNet(object):
 
 		return callbacks_
 
-	# Fit data to the model
-	# NOTE: data could be a generator too.
-	def train(self, data, val_data=None, epochs=1, steps_per_epoch=None, callbacks=[]): #model_checkpoint=False, early_stopping=False, reduce_lr=False
+	'''
+	Fit data to the model (training)
+	NOTE: data could be a generator too.
+	'''
+	def train(self, data, val_data=None, epochs=1, steps_per_epoch=None, callbacks=[]):
 
 		# in case we have any validation data 
 		if val_data is not None:
@@ -235,9 +265,11 @@ class UNet(object):
 		)
 		return history
 
-	# predict (default: from a generator) and round the resulting preds (if requested)
-	# use the kwargs to provide batch_size whether not using a generator
-	# TODO: predict on batch to keep the labels
+	'''
+	Predict (default: from a generator) and round the resulting preds (if requested)
+	use the kwargs to provide batch_size whether not using a generator
+	TODO: predict on batch to keep the labels
+	'''
 	def predict(self, data, threshold=None, **kwargs):
 		predictions = self.model.predict(data, **kwargs)
 
@@ -246,8 +278,10 @@ class UNet(object):
 			return predictions, np.where(predictions < threshold, 0, 1)
 		return predictions
 
-	# resume weights from a specific checkpoint file (or .h5)
-	# or the latest one from the provided directory
+	'''
+	Restore weights from a specific checkpoint file (or .h5)
+	or the latest one from the provided directory
+	'''
 	def load_weights(self, to_restore, checkpoint=False):
 		assert os.path.exists(to_restore)
 
@@ -258,8 +292,10 @@ class UNet(object):
 		# restore weights
 		self.model.load_weights(to_restore)
 
-	# Apart from the checkpoints, this method allows to save the entire mode
-	# which could be restored the same way as checkpoints
+	'''
+	Apart from the checkpoints, this method allows to save the entire mode
+	which could be restored the same way as checkpoints
+	'''
 	def save_weights(self, h5_path, overwrite=False):
 		assert self.model is not None
 
@@ -268,11 +304,14 @@ class UNet(object):
 				raise('Cannot save model: ' + h5_path + ' already exists')
 		self.model.save_weights(h5_path)
 
-
-	# get the Keras model
+	'''
+	Get the Keras model... just in case
+	'''
 	def get_model(self):
 		return self.model
 
-	# show the overall picture of UNet architecture
+	'''
+	Display the architecture of the current model
+	'''
 	def summary(self):
 		self.model.summary()
