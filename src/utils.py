@@ -7,7 +7,7 @@ from math import ceil
 from PIL import Image
 
 '''
-	This class shall contain only simple/dummy generators (...maybe Iterator isn't the right name)
+This class shall contain only simple/dummy generators (...maybe Iterator isn't the right name)
 '''
 class Iterator(object):
 
@@ -49,8 +49,8 @@ class Iterator(object):
 			yield(img)
 
 '''
-	This class contains simple utilities concerning images visualization
-	within the Notebook of the project.
+This class contains simple utilities concerning images visualization
+within the Notebook of the project.
 '''
 class Images(object):
 
@@ -93,6 +93,9 @@ class Images(object):
 		# show
 		plt.show()
 
+	'''
+	This method is almost a duplicate of the Iterator a ndarray of images along n_rows/n_cols (as sub-plot)
+	'''
 	@staticmethod
 	def plot_imgs_from_folder(path, n_max=-1, cols=1, cmap=None, figsize=(15, 15)):
 		assert os.path.exists(path)
