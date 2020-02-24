@@ -26,8 +26,10 @@ class EMData():
 		self.data_generator = None
 		self.split_train_for_validation = False
 	
-	# makes sure that folders structure is set up correctly
-	# and it does not overwrite anything, unintentionally
+	'''
+	It makes sure that folders structure is set up correctly
+	and it does not overwrite anything, unintentionally
+	'''
 	def _set_folders_up(self, overwrite=False):
 
 		# prepare folders (labels, train, test)
@@ -84,14 +86,18 @@ class EMData():
 				frame_name = str(frame) + (save_as if save_as.startswith('.') else '.' + save_as)
 				tif_stack.save(os.path.join(folder_path, frame_name))
 	
-	# a small hack to read data_generator internal configuration
-	# and know something about '_validation_split' value
+	'''
+	A small hack to read data_generator internal configuration
+	and know something about '_validation_split' value
+	'''
 	def _is_valid_split_set(self):
 		if self.data_generator is None:
 			return False
 		return self.data_generator.__dict__['_validation_split'] > 0.
 
-	# it provides an infinite stream of augmented data
+	'''
+	It provides an infinite stream of augmented data
+	'''
 	def _generate_data(self, subset, binary_labels=False, **kwargs):
 		kwargs_ = {
 			**dict(
@@ -126,7 +132,9 @@ class EMData():
 
 			yield X, y
 
-	# ImageDataGenerator generator which will handle train/validation data augmentation
+	'''
+	ImageDataGenerator generator which will handle train/validation data augmentation
+	'''
 	def init_data_generator(self, data_augmentation=dict()):
 		self.data_generator = ImageDataGenerator(**data_augmentation)
 
@@ -134,8 +142,10 @@ class EMData():
 		if self._is_valid_split_set():
 			print('A subset will be used for validation purposes (' + str(data_augmentation['validation_split'] * 100) + '%)')
 
-	# Overloading of the _generate_data method
-	# It generates the augmented training data  
+	'''
+	Overloading of the _generate_data method. It generates
+	the augmented training data  
+	'''
 	def generate_train(self, binary_labels=False, **kwargs):
 		assert self.data_generator is not None, 'You need to call \'set_data_generator_up\' method'
 
@@ -145,16 +155,20 @@ class EMData():
 		# generate training data
 		return self._generate_data(subset, binary_labels=binary_labels, **kwargs)
 
-	# Overloading of the _generate_data method
-	# It generates the augmented validation data (if needed)  
+	'''
+	Overloading of the _generate_data method
+	It generates the augmented validation data (if needed)  
+	'''
 	def generate_valid(self, binary_labels=False, **kwargs):
 		assert self._is_valid_split_set(), 'You should\'ve set \'validation_split\' in \'set_data_generator_up\' method. All the data were used for training purposes.'  
 
 		# it generates validation data
 		return self._generate_data('validation', binary_labels=binary_labels, **kwargs)
 
-	# INFO: We don't have the test labels
-	# Test data is used for the prediction phase
+	'''
+	INFO: We don't have the test labels
+	Test data is used for the prediction phase
+	'''
 	def generate_test(self):
 		raise('Sorry, not implemented. However, you could iterate over test data through Iterator.imgs_from_folder.')
 
