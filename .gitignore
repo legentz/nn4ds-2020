@@ -8,6 +8,7 @@ __pycache__
 # data
 data/**
 !data/em_segmentation.zip
+!data/pre_trained.zip
 
 # model checkpoints/saved .h5
 *.h5
